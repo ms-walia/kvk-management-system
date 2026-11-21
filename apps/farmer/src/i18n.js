@@ -22,6 +22,11 @@ export const STRINGS = {
     s_new: 'Complete your profile to get verified', s_pending: 'Waiting for KVK verification. Carry your ID when you visit.',
     s_verified: 'Verified farmer', s_rejected: 'Verification rejected', offline: 'No internet. Showing saved info.',
     allMachines: 'All', availableOnly: 'Only available',
+    signIn: 'Sign in', signUp: 'Create account', password: 'Password',
+    signUpHint: 'After signing up, fill in your profile. Your KVK will verify you before you can book.',
+    badPhone: 'Enter a valid 10-digit mobile number', shortPw: 'Password must be at least 6 characters',
+    exists: 'An account with this number already exists. Please sign in.', wrongPw: 'Wrong mobile number or password',
+    tooMany: 'Too many attempts. Try again later.',
   },
   hi: {
     app: 'केवीके किसान', tagline: 'अपने कृषि विज्ञान केंद्र से कृषि यंत्र किराये पर लें और प्रमाणित खाद-बीज खरीदें',
@@ -45,6 +50,11 @@ export const STRINGS = {
     s_new: 'सत्यापन के लिए प्रोफ़ाइल पूरी करें', s_pending: 'केवीके सत्यापन बाकी है। केवीके जाते समय पहचान पत्र साथ लाएं।',
     s_verified: 'सत्यापित किसान', s_rejected: 'सत्यापन अस्वीकृत', offline: 'इंटरनेट नहीं है।',
     allMachines: 'सभी', availableOnly: 'सिर्फ़ उपलब्ध',
+    signIn: 'लॉगिन', signUp: 'नया खाता बनाएं', password: 'पासवर्ड',
+    signUpHint: 'खाता बनाने के बाद प्रोफ़ाइल भरें। बुकिंग से पहले केवीके आपका सत्यापन करेगा।',
+    badPhone: 'सही 10 अंकों का मोबाइल नंबर डालें', shortPw: 'पासवर्ड कम से कम 6 अक्षर का हो',
+    exists: 'इस नंबर से खाता पहले से है। कृपया लॉगिन करें।', wrongPw: 'मोबाइल नंबर या पासवर्ड गलत है',
+    tooMany: 'बहुत ज़्यादा प्रयास। बाद में कोशिश करें।',
   },
 };
 

@@ -3,10 +3,10 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeApp, deleteApp, getApps } from 'firebase/app';
-import { getAuth, connectAuthEmulator, signInWithEmailAndPassword, signInWithCustomToken } from 'firebase/auth';
+import { getAuth, connectAuthEmulator, signInWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { getAuth as adminAuth } from 'firebase-admin/auth';
-import { createBackend, todayIST, addDays } from '../shared/backend.js';
+import { createBackend, todayIST, addDays, farmerEmail } from '../shared/backend.js';
 import { seed } from '../scripts/seed.js';
 
 const today = todayIST();
@@ -25,10 +25,11 @@ async function actor(signIn) {
 }
 const staff = (email, password) => actor((a) => signInWithEmailAndPassword(a, email, password));
 const cache = {};
+// Farmers log in with mobile number + password (mapped to <number>@farmer.kvk.in)
 const farmer = async (phone) => (cache[phone] ??= actor(async (a) => {
-  let u;
-  try { u = await adminAuth().getUserByPhoneNumber(`+91${phone}`); } catch { u = await adminAuth().createUser({ phoneNumber: `+91${phone}` }); }
-  await signInWithCustomToken(a, await adminAuth().createCustomToken(u.uid));
+  const email = farmerEmail(phone);
+  try { await adminAuth().getUserByEmail(email); } catch { await adminAuth().createUser({ email, password: 'kisan123' }); }
+  await signInWithEmailAndPassword(a, email, 'kisan123');
 }));
 const anon = () => actor();
 

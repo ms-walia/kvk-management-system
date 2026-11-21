@@ -12,6 +12,13 @@ import { getAuth, initializeAuth, inMemoryPersistence, createUserWithEmailAndPas
 let secondaryAuth = null;
 import { initializeApp, getApps } from 'firebase/app';
 
+// Farmers sign in with mobile number + password. Firebase Auth needs an email, so the
+// mobile number is mapped to <number>@farmer.kvk.in behind the scenes.
+export const FARMER_DOMAIN = 'farmer.kvk.in';
+export const farmerEmail = (phone) => `${String(phone).replace(/\D/g, '').slice(-10)}@${FARMER_DOMAIN}`;
+const phoneOf = (u) => (u.phoneNumber ? u.phoneNumber.replace(/^\+91/, '')
+  : (u.email || '').endsWith('@' + FARMER_DOMAIN) ? u.email.split('@')[0] : null);
+
 export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
@@ -117,7 +124,7 @@ export function createBackend(app) {
   };
   function farmerUid() {
     const u = user();
-    if (!u.phoneNumber) throw forbidden('Please sign in with your mobile number');
+    if (!phoneOf(u)) throw forbidden('Please sign in with your mobile number');
     return u;
   }
 
@@ -177,7 +184,7 @@ export function createBackend(app) {
     const u = farmerUid();
     let f = await one('farmers', u.uid);
     if (!f) {
-      f = { phone: u.phoneNumber.replace(/^\+91/, ''), status: 'new', kvk_id: null, created_at: now() };
+      f = { phone: phoneOf(u), status: 'new', kvk_id: null, created_at: now() };
       await setDoc(D('farmers', u.uid), f);
       f = { id: u.uid, ...f };
     }

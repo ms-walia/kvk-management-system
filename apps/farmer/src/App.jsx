@@ -1,39 +1,34 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber, signOut } from 'firebase/auth';
-import { auth, USE_EMULATOR } from './firebase.js';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { farmerEmail } from '../../../shared/backend.js';
+import { auth } from './firebase.js';
 import { api, prefs, today, addDays, daysBetween, inr, fmtDate } from './api.js';
 import { makeT } from './i18n.js';
 
 const Ctx = React.createContext(null);
 const useApp = () => React.useContext(Ctx);
 
-// ---------------- Sign in with phone OTP ----------------
+// ---------------- Sign in with mobile number + password ----------------
 function Login({ onBrowse }) {
   const { t } = useApp();
+  const [mode, setMode] = useState('in'); // 'in' | 'up'
   const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
-  const [confirm, setConfirm] = useState(null);
+  const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
-  const send = async (e) => {
+  const submit = async (e) => {
     e.preventDefault(); setErr(null);
-    const digits = phone.replace(/\D/g, '').slice(-10);
-    if (!/^[6-9]\d{9}$/.test(digits)) return setErr('Enter a valid 10-digit mobile number');
+    if (!/^[6-9]\d{9}$/.test(phone)) return setErr(t('badPhone'));
+    if (pw.length < 6) return setErr(t('shortPw'));
     setBusy(true);
     try {
-      window.kvkRecaptcha ??= new RecaptchaVerifier(auth, 'recaptcha', { size: 'invisible' });
-      setConfirm(await signInWithPhoneNumber(auth, `+91${digits}`, window.kvkRecaptcha));
+      if (mode === 'up') await createUserWithEmailAndPassword(auth, farmerEmail(phone), pw);
+      else await signInWithEmailAndPassword(auth, farmerEmail(phone), pw);
     } catch (x) {
-      setErr(x.code === 'auth/too-many-requests' ? 'Too many attempts. Try again later.' : x.message);
-      window.kvkRecaptcha?.clear(); window.kvkRecaptcha = null;
+      const c = x.code || '';
+      setErr(c.includes('email-already-in-use') ? t('exists') : /invalid|wrong|not-found|credential/.test(c) ? t('wrongPw') : c.includes('too-many') ? t('tooMany') : x.message);
     } finally { setBusy(false); }
-  };
-  const verify = async (e) => {
-    e.preventDefault(); setErr(null); setBusy(true);
-    try { await confirm.confirm(code.trim()); }
-    catch (x) { setErr(x.code === 'auth/invalid-verification-code' ? 'Wrong OTP' : x.message); }
-    finally { setBusy(false); }
   };
 
   return (
@@ -43,25 +38,20 @@ function Login({ onBrowse }) {
       <h1>{t('app')}</h1>
       <p className="tagline">{t('tagline')}</p>
       <div className="sheet">
-        {!confirm ? (
-          <form onSubmit={send}>
-            <label className="lbl">{t('phone')}</label>
-            <div className="phone"><span>+91</span><input inputMode="numeric" autoComplete="tel-national" maxLength={10} value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} placeholder="98765 43210" autoFocus /></div>
-            {err && <div className="err">{err}</div>}
-            <button className="btn" disabled={busy}>{busy ? '…' : t('sendOtp')}</button>
-          </form>
-        ) : (
-          <form onSubmit={verify}>
-            <label className="lbl">{t('otp')} (+91 {phone})</label>
-            <input className="otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} autoFocus />
-            {USE_EMULATOR && <div className="hint">Local test mode: the OTP is shown in the Firebase emulator log / UI (Auth tab).</div>}
-            {err && <div className="err">{err}</div>}
-            <button className="btn" disabled={busy || code.length !== 6}>{busy ? '…' : t('verify')}</button>
-            <button type="button" className="link" onClick={() => { setConfirm(null); setCode(''); }}>{t('changeNumber')}</button>
-          </form>
-        )}
+        <div className="seg">
+          <button className={mode === 'in' ? 'on' : ''} onClick={() => setMode('in')}>{t('signIn')}</button>
+          <button className={mode === 'up' ? 'on' : ''} onClick={() => setMode('up')}>{t('signUp')}</button>
+        </div>
+        <form onSubmit={submit}>
+          <label className="lbl">{t('phone')}</label>
+          <div className="phone"><span>+91</span><input inputMode="numeric" autoComplete="username" maxLength={10} value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} placeholder="98765 43210" autoFocus /></div>
+          <label className="lbl">{t('password')}</label>
+          <input type="password" autoComplete={mode === 'up' ? 'new-password' : 'current-password'} value={pw} onChange={(e) => setPw(e.target.value)} />
+          {mode === 'up' && <div className="hint">{t('signUpHint')}</div>}
+          {err && <div className="err">{err}</div>}
+          <button className="btn" disabled={busy}>{busy ? '…' : mode === 'up' ? t('signUp') : t('signIn')}</button>
+        </form>
         <button className="link" onClick={onBrowse}>{t('browse')}</button>
-        <div id="recaptcha" />
       </div>
     </div>
   );

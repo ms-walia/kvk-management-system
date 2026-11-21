@@ -23,7 +23,8 @@ Both apps use the same data layer, `shared/backend.js`, which talks to Firestore
 - **Staff**: managers add staff for their KVK; admins add managers and admins.
 
 **Farmer app**
-- Sign in with mobile number + SMS OTP (Firebase Phone Auth), or browse without signing in.
+- Sign in or create an account with mobile number + password (no OTP needed), or browse without signing in.
+  Behind the scenes the number is stored as a Firebase email login `<number>@farmer.kvk.in`.
 - Pick state → district → KVK. See every machine's availability for the next week and for chosen dates.
 - See feed/fertilizer/seed stock (in stock / few left / out) and prices.
 - Complete profile → KVK verifies → book machines; track and cancel bookings.
@@ -54,8 +55,7 @@ npm test                   # 10 tests of the data layer AND the security rules, 
 ```
 
 Demo logins (emulator only): `admin@kvk.in` / `admin12345`, `manager.ludhiana@kvk.in` / `manager123`,
-`staff.ludhiana@kvk.in` / `staff1234`. Farmers: any 10-digit number (verified demo farmer: `9876500001`);
-the OTP shows in the emulator UI under Authentication.
+`staff.ludhiana@kvk.in` / `staff1234`. Farmers: mobile `9876500001` (verified) or `9876500003` (pending) with the emulator seed password in `scripts/seed.js`.
 
 ## Deploy to `kvk-management-system` (Spark plan)
 
@@ -75,6 +75,18 @@ farmers sign in with the test numbers and their fixed codes. Moving to Blaze lat
    ```
 3. Open `https://kvk-management-system.web.app/erp`, click **Set up the national admin**, then on the KVKs page click
    **Load sample KVKs** (or add real ones), open a KVK and add its manager under Staff.
+
+## Demo accounts in the real project
+
+After the rules are deployed, create demo logins and sample data (safe to re-run). Passwords are given on the
+command line and are not stored in the repo:
+```bash
+FIREBASE_API_KEY=<web api key> FIREBASE_PROJECT_ID=kvk-management-system \
+ADMIN_PASSWORD=... STAFF_PASSWORD=... FARMER_PASSWORD=... node scripts/create-demo-accounts.js
+```
+Creates: national admin `admin@kvk.in`; managers `manager.ludhiana@kvk.in`, `manager.karnal@kvk.in`,
+`manager.baramati@kvk.in`; staff `staff.ludhiana@kvk.in`; farmers (mobile number logins) `9876500001`, `9876500002`
+(verified, Ludhiana), `9876500003` (awaiting verification, Ludhiana), `9876500011` (verified, Karnal); a few bookings.
 
 ## Deploy the web apps on Vercel (alternative to Firebase Hosting)
 

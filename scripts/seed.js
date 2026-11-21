@@ -70,7 +70,7 @@ export async function seed() {
   // Farmers: phone-auth users + profiles
   const farmerIds = [];
   for (const [i, [phone, name, village, status, land]] of FARMERS.entries()) {
-    const u = await auth.createUser({ phoneNumber: `+91${phone}`, displayName: name });
+    const u = await auth.createUser({ email: `${phone}@farmer.kvk.in`, password: 'kisan123', displayName: name });
     farmerIds.push(u.uid);
     await col.farmers().doc(u.uid).set({
       phone, name, village, district: 'Ludhiana', state: 'Punjab', kvk_id: 'PB-LDH', id_type: 'Aadhaar',

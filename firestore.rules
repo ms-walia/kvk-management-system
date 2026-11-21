@@ -12,7 +12,12 @@ service cloud.firestore {
     function isAdmin() { return isStaff() && me().role == 'admin'; }
     function staffOf(kvk) { return isStaff() && (me().role == 'admin' || me().kvk_id == kvk); }
     function managerOf(kvk) { return isStaff() && (me().role == 'admin' || (me().role == 'manager' && me().kvk_id == kvk)); }
-    function isFarmer() { return signedIn() && request.auth.token.phone_number is string; }
+    // Farmers: phone-auth users, or mobile-number logins stored as <10 digits>@farmer.kvk.in
+    function hasPhone() { return 'phone_number' in request.auth.token && request.auth.token.phone_number is string; }
+    function isFarmer() { return signedIn() && (hasPhone()
+      || ('email' in request.auth.token && request.auth.token.email.matches('^[6-9][0-9]{9}@farmer[.]kvk[.]in$'))); }
+    function farmerPhone() { return hasPhone()
+      ? request.auth.token.phone_number.replace('^[+]91', '') : request.auth.token.email.split('@')[0]; }
     function farmer() { return get(/databases/$(database)/documents/farmers/$(request.auth.uid)).data; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function unchanged(fields) { return !changed().hasAny(fields); }
@@ -52,7 +57,7 @@ service cloud.firestore {
       allow read: if (signedIn() && request.auth.uid == uid) || staffOf(resource.data.kvk_id);
       allow create: if isFarmer() && request.auth.uid == uid
         && request.resource.data.status == 'new'
-        && request.auth.token.phone_number == '+91' + request.resource.data.phone;
+        && request.resource.data.phone == farmerPhone();
       // Farmer edits own profile: cannot verify themselves or change phone; changing identity
       // (name, KVK, ID) always sends the profile back for verification.
       allow update: if (isFarmer() && request.auth.uid == uid
