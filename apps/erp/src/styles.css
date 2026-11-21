@@ -117,6 +117,10 @@ td > .badge:first-child { margin-left: 0; }
   .content { padding: 16px; }
   .top { padding: 8px 16px; }
   .cal { grid-template-columns: repeat(4, 1fr); }
+  .stats { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { padding: 12px; }
+  .stat-v { font-size: 22px; }
+  .row .search { max-width: none; flex: 1 1 100%; order: 3; }
 }
 .top-error { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 60; }
 button.link { padding-left: 0; color: var(--green-d); margin-top: 8px; }

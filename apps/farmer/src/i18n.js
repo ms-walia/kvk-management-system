@@ -27,6 +27,7 @@ export const STRINGS = {
     badPhone: 'Enter a valid 10-digit mobile number', shortPw: 'Password must be at least 6 characters',
     exists: 'An account with this number already exists. Please sign in.', wrongPw: 'Wrong mobile number or password',
     tooMany: 'Too many attempts. Try again later.',
+    f1: 'See which machines are free at your KVK, day by day', f2: 'Check certified feed, fertilizer and seed stock', f3: 'Book online once your KVK verifies you',
   },
   hi: {
     app: 'केवीके किसान', tagline: 'अपने कृषि विज्ञान केंद्र से कृषि यंत्र किराये पर लें और प्रमाणित खाद-बीज खरीदें',
@@ -55,6 +56,7 @@ export const STRINGS = {
     badPhone: 'सही 10 अंकों का मोबाइल नंबर डालें', shortPw: 'पासवर्ड कम से कम 6 अक्षर का हो',
     exists: 'इस नंबर से खाता पहले से है। कृपया लॉगिन करें।', wrongPw: 'मोबाइल नंबर या पासवर्ड गलत है',
     tooMany: 'बहुत ज़्यादा प्रयास। बाद में कोशिश करें।',
+    f1: 'देखें आपके केवीके में कौन से यंत्र किस दिन उपलब्ध हैं', f2: 'प्रमाणित चारा, खाद और बीज का स्टॉक देखें', f3: 'केवीके सत्यापन के बाद ऑनलाइन बुक करें',
   },
 };
 

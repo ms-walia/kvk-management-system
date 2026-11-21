@@ -34,9 +34,15 @@ function Login({ onBrowse }) {
   return (
     <div className="hero">
       <div className="hero-top"><LangToggle /></div>
-      <div className="logo">🌾</div>
-      <h1>{t('app')}</h1>
-      <p className="tagline">{t('tagline')}</p>
+      <div className="hero-grid">
+      <div className="hero-copy">
+        <div className="logo">🌾</div>
+        <h1>{t('app')}</h1>
+        <p className="tagline">{t('tagline')}</p>
+        <ul className="features desk-only">
+          <li>🚜 {t('f1')}</li><li>🌱 {t('f2')}</li><li>✅ {t('f3')}</li>
+        </ul>
+      </div>
       <div className="sheet">
         <div className="seg">
           <button className={mode === 'in' ? 'on' : ''} onClick={() => setMode('in')}>{t('signIn')}</button>
@@ -52,6 +58,7 @@ function Login({ onBrowse }) {
           <button className="btn" disabled={busy}>{busy ? '…' : mode === 'up' ? t('signUp') : t('signIn')}</button>
         </form>
         <button className="link" onClick={onBrowse}>{t('browse')}</button>
+      </div>
       </div>
     </div>
   );
@@ -123,16 +130,16 @@ function Machines({ kvkId, onBook }) {
     .filter((e) => !onlyFree || e.min_available > 0);
   return (
     <>
-      <div className="dates">
+      <div className="toolbar"><div className="dates">
         <label>{t('from')}<input type="date" value={start} min={today()} max={addDays(today(), 90)} onChange={(e) => { setStart(e.target.value); if (e.target.value > end) setEnd(e.target.value); }} /></label>
         <label>{t('to')}<input type="date" value={end} min={start} max={addDays(start, 30)} onChange={(e) => setEnd(e.target.value)} /></label>
       </div>
       <div className="chips">
         <button className={!onlyFree ? 'chip on' : 'chip'} onClick={() => setOnlyFree(false)}>{t('allMachines')}</button>
         <button className={onlyFree ? 'chip on' : 'chip'} onClick={() => setOnlyFree(true)}>{t('availableOnly')}</button>
-      </div>
+      </div></div>
       {err && <div className="err">{err === 'offline' ? t('offline') : err}</div>}
-      {!data ? <div className="muted">…</div> : items.map((e) => {
+      {!data ? <div className="muted">…</div> : <div className="grid-cards">{items.map((e) => {
         const days = daysBetween(start, end);
         const tooLong = days > e.max_days;
         return (
@@ -157,7 +164,7 @@ function Machines({ kvkId, onBook }) {
             </div>
           </div>
         );
-      })}
+      })}</div>}
     </>
   );
 }
@@ -200,7 +207,7 @@ function StockTab({ kvk }) {
   return (
     <>
       <p className="muted small">{t('buyAtKvk')}</p>
-      {groups.map(([g, list]) => (
+      <div className="stock-grid">{groups.map(([g, list]) => (
         <div key={g} className="card">
           <h3>{t(g)}</h3>
           {list.map((s) => (
@@ -210,7 +217,7 @@ function StockTab({ kvk }) {
             </div>
           ))}
         </div>
-      ))}
+      ))}</div>
     </>
   );
 }
@@ -223,7 +230,7 @@ function BookingsTab() {
   useEffect(() => { load(); }, []);
   if (!rows) return <div className="muted">…</div>;
   if (!rows.length) return <div className="empty">{t('noBookings')}</div>;
-  return rows.map((b) => (
+  return <div className="grid-cards">{rows.map((b) => (
     <div key={b.id} className={`card booking st-${b.status}`}>
       <div className="m-head"><b>{b.equipment_name}{b.qty > 1 ? ` ×${b.qty}` : ''}</b><span className="muted small">#{b.ref}</span></div>
       <div>{fmtDate(b.start_date, lang)} – {fmtDate(b.end_date, lang)} · {inr(b.amount)}</div>
@@ -233,7 +240,7 @@ function BookingsTab() {
         <button className="link danger" onClick={async () => { await api(`/farmer/bookings/${b.id}/cancel`, { method: 'POST' }); load(); }}>{t('cancel')}</button>
       )}
     </div>
-  ));
+  ))}</div>;
 }
 
 // ---------------- Profile ----------------
@@ -323,13 +330,36 @@ export default function App() {
     <Ctx.Provider value={ctx}>
       <div className="app">
         <header className="bar">
-          <div><div className="bar-title">{kvk?.name || t('app')}</div>{kvk && <div className="bar-sub">{kvk.district}, {kvk.state}</div>}</div>
-          <div className="bar-actions">
-            {kvk?.phone && <a className="call" href={`tel:${kvk.phone}`}>📞 {t('call')}</a>}
-            <LangToggle />
+          <div className="bar-inner">
+            <div className="brand-block">
+              <span className="brand-logo">🌾</span>
+              <div><div className="bar-title">{kvk?.name || t('app')}</div>{kvk && <div className="bar-sub">{kvk.district}, {kvk.state}</div>}</div>
+            </div>
+            {/* Laptop/desktop: navigation lives in the header */}
+            <nav className="topnav">{tabs.map(([k, icon, label]) => (
+              <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><span>{icon}</span>{label}</button>
+            ))}</nav>
+            <div className="bar-actions">
+              {kvk?.phone && <a className="call" href={`tel:${kvk.phone}`}>📞 <span className="call-label">{t('call')}</span></a>}
+              <LangToggle />
+              {farmer ? <button className="lang desk-only" onClick={() => signOut(auth)}>{t('signOut')}</button>
+                : <button className="lang desk-only" onClick={() => setBrowsing(false)}>{t('signIn')}</button>}
+            </div>
           </div>
         </header>
-        <main className="body">
+        {kvk && (
+          <section className="kvk-hero desk-only">
+            <div className="kvk-hero-inner">
+              <div><h1>{kvk.name}</h1><p>{kvk.address}{kvk.host_institution ? ` · ${kvk.host_institution}` : ''}</p></div>
+              <div className="hero-stats">
+                <div><b>{kvk.equipment.length}</b><span>{t('equipment')}</span></div>
+                <div><b>{kvk.stock.filter((x) => x.level !== 'out').length}</b><span>{t('inStock')}</span></div>
+                {farmer && <div><b className={`st st-${farmer.status}`}>{t(`s_${farmer.status}`).split('.')[0]}</b><span>{t('profile')}</span></div>}
+              </div>
+            </div>
+          </section>
+        )}
+        <main className={`body tab-${tab}`}>
           {farmer && farmer.status !== 'verified' && tab !== 'profile' && <div onClick={() => setTab('profile')}><StatusBanner /></div>}
           {!kvkId && !farmer ? (
             <div className="card"><h3>{t('findKvk')}</h3><KvkPicker onPick={(k) => { setBrowseKvk(k); prefs.set('browseKvk', k); }} /></div>
@@ -347,6 +377,7 @@ export default function App() {
         ))}</nav>
         {booking && <BookSheet {...booking} onClose={() => setBooking(null)} onDone={() => { setBooking(null); setToast(t('requested')); setTab('bookings'); }} />}
         {toast && <div className="toast" onAnimationEnd={() => setToast(null)}>{toast}</div>}
+        <footer className="site-foot desk-only">🌾 {t('app')} · {t('tagline')}</footer>
       </div>
     </Ctx.Provider>
   );
