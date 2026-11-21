@@ -88,23 +88,14 @@ Creates: national admin `admin@kvk.in`; managers `manager.ludhiana@kvk.in`, `man
 `manager.baramati@kvk.in`; staff `staff.ludhiana@kvk.in`; farmers (mobile number logins) `9876500001`, `9876500002`
 (verified, Ludhiana), `9876500003` (awaiting verification, Ludhiana), `9876500011` (verified, Karnal); a few bookings.
 
-## Deploy the web apps on Vercel (alternative to Firebase Hosting)
+## Deploy the web apps on Vercel
 
-Firebase still provides Auth and Firestore; Vercel only serves the two built apps (`vercel.json` is included).
-
-1. In Vercel: **Add New → Project → Import** `ms-walia/kvk-management-system`. Framework preset: **Other**
-   (build command, output directory and routes come from `vercel.json`).
-2. **Settings → Environment Variables** (Production and Preview), values from Firebase console → Project settings → Your apps → Web app:
-   `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN` (`kvk-management-system.firebaseapp.com`),
-   `VITE_FIREBASE_PROJECT_ID` (`kvk-management-system`), `VITE_FIREBASE_APP_ID`. Redeploy after adding them.
-3. Firebase console → **Authentication → Settings → Authorized domains**: add your Vercel domain
-   (e.g. `kvk-management-system.vercel.app`), or sign-in will fail.
-4. Publish the security rules and indexes once from your Mac (Vercel does not do this):
-   ```bash
-   npx firebase deploy --only firestore --project kvk-management-system
-   ```
-   Without this step Firestore keeps its default "deny everything" rules and the apps cannot load data.
-5. Open `https://<your-vercel-domain>/erp` → **Set up the national admin** → KVKs → **Load sample KVKs**.
+Zero configuration: in Vercel, **Add New → Project → Import** `ms-walia/kvk-management-system` and press **Deploy**.
+`vercel.json` sets the build, and the public Firebase web config for `kvk-management-system` is built into the apps
+(`apps/*/src/firebase.js`; `VITE_FIREBASE_*` env vars override it if you ever point at another project).
+The farmer app is served at `/` and the ERP at `/erp`. Email/password sign-in works on any domain, so no Firebase
+console change is needed. If you change `firestore.rules`, publish them with
+`npx firebase deploy --only firestore --project kvk-management-system`.
 
 ## Next steps (not built yet)
 - Bulk import of all ~730 KVKs from the ICAR list (CSV upload).
