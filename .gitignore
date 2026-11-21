@@ -1,0 +1,8 @@
+node_modules
+dist
+hosting
+.env
+.DS_Store
+*.log
+.firebase
+functions/.runtimeconfig.json

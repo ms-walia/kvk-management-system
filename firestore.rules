@@ -1,0 +1,107 @@
+rules_version = '2';
+// The apps talk to Firestore directly (Spark plan, no Cloud Functions), so these rules are the
+// real access control. Roles live in /staff/{uid}: admin (national), manager and staff (one KVK).
+// Farmers sign in with phone auth and own /farmers/{uid}.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function staffPath() { return /databases/$(database)/documents/staff/$(request.auth.uid); }
+    function isStaff() { return signedIn() && exists(staffPath()) && get(staffPath()).data.active == true; }
+    function me() { return get(staffPath()).data; }
+    function isAdmin() { return isStaff() && me().role == 'admin'; }
+    function staffOf(kvk) { return isStaff() && (me().role == 'admin' || me().kvk_id == kvk); }
+    function managerOf(kvk) { return isStaff() && (me().role == 'admin' || (me().role == 'manager' && me().kvk_id == kvk)); }
+    function isFarmer() { return signedIn() && request.auth.token.phone_number is string; }
+    function farmer() { return get(/databases/$(database)/documents/farmers/$(request.auth.uid)).data; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function unchanged(fields) { return !changed().hasAny(fields); }
+
+    // ---- KVK directory: public ----
+    match /kvks/{kvkId} {
+      allow read: if true;
+      allow create: if isAdmin() && request.resource.data.code == kvkId;
+      allow update: if isAdmin() && unchanged(['code'])
+        || (managerOf(kvkId) && changed().hasOnly(['address', 'phone']));
+    }
+
+    // ---- One-time setup: the first person to claim it becomes national admin, then it locks ----
+    function setupPath() { return /databases/$(database)/documents/config/setup; }
+    match /config/setup {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.admin_uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // ---- Staff accounts ----
+    match /staff/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin()
+        || (isStaff() && me().role == 'manager' && resource.data.kvk_id == me().kvk_id));
+      allow create: if isAdmin()
+        || (signedIn() && request.auth.uid == uid && request.resource.data.role == 'admin'
+            && request.resource.data.active == true && !exists(setupPath()) && existsAfter(setupPath()))
+        || (isStaff() && me().role == 'manager' && request.resource.data.role == 'staff'
+            && request.resource.data.kvk_id == me().kvk_id && request.resource.data.active == true);
+      allow update: if (isAdmin() && request.auth.uid != uid)
+        || (isStaff() && me().role == 'manager' && resource.data.role == 'staff'
+            && resource.data.kvk_id == me().kvk_id && changed().hasOnly(['active']));
+    }
+
+    // ---- Farmers ----
+    match /farmers/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid) || staffOf(resource.data.kvk_id);
+      allow create: if isFarmer() && request.auth.uid == uid
+        && request.resource.data.status == 'new'
+        && request.auth.token.phone_number == '+91' + request.resource.data.phone;
+      // Farmer edits own profile: cannot verify themselves or change phone; changing identity
+      // (name, KVK, ID) always sends the profile back for verification.
+      allow update: if (isFarmer() && request.auth.uid == uid
+          && unchanged(['phone', 'verified_by', 'verified_at'])
+          && (request.resource.data.status == 'pending'
+              || (request.resource.data.status == resource.data.status
+                  && unchanged(['name', 'kvk_id', 'id_last4', 'status_note']))))
+        || (staffOf(resource.data.kvk_id)
+          && changed().hasOnly(['status', 'status_note', 'verified_by', 'verified_at'])
+          && request.resource.data.status in ['verified', 'rejected']
+          && request.resource.data.verified_by == request.auth.uid);
+    }
+
+    // ---- Equipment: public catalogue; holds map tracks approved bookings (no personal data) ----
+    match /equipment/{id} {
+      allow read: if true;
+      allow create: if managerOf(request.resource.data.kvk_id);
+      allow update: if (managerOf(resource.data.kvk_id) && unchanged(['kvk_id']))
+        || (staffOf(resource.data.kvk_id) && changed().hasOnly(['holds', 'booking_rev']));
+    }
+
+    // ---- Feeds / fertilizers / seeds: public stock levels ----
+    match /stock_items/{id} {
+      allow read: if true;
+      allow create: if managerOf(request.resource.data.kvk_id);
+      allow update: if ((managerOf(resource.data.kvk_id) && unchanged(['kvk_id']))
+          || (staffOf(resource.data.kvk_id) && changed().hasOnly(['quantity', 'updated_at'])))
+        && request.resource.data.quantity >= 0;
+    }
+    match /stock_movements/{id} {
+      allow read: if staffOf(resource.data.kvk_id);
+      allow create: if staffOf(request.resource.data.kvk_id) && request.resource.data.user_id == request.auth.uid
+        && getAfter(/databases/$(database)/documents/stock_items/$(request.resource.data.item_id)).data.kvk_id == request.resource.data.kvk_id;
+    }
+
+    // ---- Bookings ----
+    match /bookings/{id} {
+      allow read: if (signedIn() && resource.data.farmer_id == request.auth.uid) || staffOf(resource.data.kvk_id);
+      allow create: if isFarmer()
+        && request.resource.data.farmer_id == request.auth.uid
+        && request.resource.data.status == 'requested'
+        && request.resource.data.qty is int && request.resource.data.qty > 0
+        && farmer().status == 'verified'
+        && farmer().kvk_id == request.resource.data.kvk_id
+        && get(/databases/$(database)/documents/equipment/$(request.resource.data.equipment_id)).data.kvk_id == request.resource.data.kvk_id;
+      allow update: if (signedIn() && resource.data.farmer_id == request.auth.uid
+          && resource.data.status == 'requested' && request.resource.data.status == 'cancelled'
+          && changed().hasOnly(['status', 'cancelled_at']))
+        || (staffOf(resource.data.kvk_id) && unchanged(['kvk_id', 'farmer_id', 'equipment_id', 'qty', 'start_date']));
+    }
+  }
+}
