@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { api, inr, fmtDate } from './api.js';
 import { useLoad, Badge, Modal, ActionForm, Field, ErrorBox, Loading, Empty, Tabs } from './ui.jsx';
+import { TRAINING_CATEGORIES, MAX_FORM_BYTES } from '../../../shared/backend.js';
+import { DEMO_TRAINING_DOCS, DEMO_TRAINING_STEPS } from '../../../shared/demo-data.js';
 
 const Stat = ({ label, value, tone, onClick }) => (
   <button className={`stat ${tone || ''}`} onClick={onClick} disabled={!onClick}>
@@ -455,5 +457,127 @@ export function Staff({ kvkKey, isAdmin }) {
         </Modal>
       )}
     </>
+  );
+}
+
+// ---------------- Trainings ----------------
+// Staff publish training programmes; farmers see them in the KVK Kisan app, download the
+// application form and register in person at the KVK office.
+const AUDIENCES = ['Farmers', 'Farm women', 'Rural youth', 'Farmers and rural youth', 'Students', 'Extension workers', 'Anyone interested'];
+
+const readFileBase64 = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1] || '');
+  r.onerror = () => reject(new Error('Could not read the file'));
+  r.readAsDataURL(file);
+});
+const kb = (n) => `${Math.max(1, Math.round(n / 1024))} KB`;
+
+export function Trainings({ kvkKey }) {
+  const [when, setWhen] = useState('upcoming');
+  const [rows, err, reload] = useLoad(`/erp/trainings?when=${when}`, [kvkKey]);
+  const [edit, setEdit] = useState(null);
+  const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+  const blank = () => ({ category: 'Agriculture', audience: 'Farmers', active: true, documents: DEMO_TRAINING_DOCS, steps: DEMO_TRAINING_STEPS, venue: 'KVK training hall' });
+  return (
+    <>
+      <div className="row"><h2>Trainings</h2><button className="primary" onClick={() => setEdit(blank())}>+ Add training</button></div>
+      <p className="muted">Farmers see these in the KVK Kisan app with the timings, how to apply, the documents to bring and the application form to download. Registration happens at the KVK office.</p>
+      <Tabs value={when} onChange={setWhen} options={[['upcoming', 'Upcoming and running'], ['past', 'Past']]} />
+      <ErrorBox error={err} />
+      {!rows ? <Loading /> : !rows.length ? <Empty>{when === 'past' ? 'No past trainings.' : 'No upcoming trainings. Add one so farmers can see it.'}</Empty> : (
+        <div className="card flush"><table className="table">
+          <thead><tr><th>Training</th><th>Dates and timing</th><th>Apply by</th><th className="num">Seats</th><th>Form</th><th></th></tr></thead>
+          <tbody>{rows.map((tr) => (
+            <tr key={tr.id} className={tr.active ? '' : 'inactive'}>
+              <td><b>{tr.title}</b>{!tr.active && <span className="badge b-cancelled">Hidden</span>}
+                <div className="muted small">{tr.category}{tr.audience ? ` · ${tr.audience}` : ''}</div></td>
+              <td>{fmtDate(tr.start_date)}{tr.end_date !== tr.start_date ? ` – ${fmtDate(tr.end_date)}` : ''}
+                {tr.start_date <= today && tr.end_date >= today && <span className="badge b-issued">Running</span>}
+                <div className="muted small">{tr.timing}</div></td>
+              <td>{tr.last_date ? <span className={tr.last_date < today ? 'muted' : ''}>{fmtDate(tr.last_date)}</span> : <span className="muted">—</span>}</td>
+              <td className="num">{tr.seats ?? '—'}{tr.fee ? <div className="muted small">{inr(tr.fee)}</div> : <div className="muted small">Free</div>}</td>
+              <td>{tr.form ? <span className="ok small">✓ {tr.form.url ? 'Link' : kb(tr.form.size || 0)}</span> : <span className="warn small">No form</span>}
+                <div className="muted small">{(tr.documents || []).length} documents</div></td>
+              <td className="actions"><button className="sm" onClick={() => setEdit(tr)}>Edit</button></td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+      {edit && <TrainingModal training={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
+    </>
+  );
+}
+
+function TrainingModal({ training: tr, onClose, onSaved }) {
+  const [delErr, setDelErr] = useState(null);
+  const [sure, setSure] = useState(false);
+  const save = async (f) => {
+    const body = {
+      title: f.title, category: f.category, audience: f.audience, description: f.description,
+      start_date: f.start_date, end_date: f.end_date || f.start_date, timing: f.timing, last_date: f.last_date,
+      venue: f.venue, seats: f.seats, fee: f.fee, contact: f.contact, documents: f.documents, steps: f.steps,
+      active: f.active === 'on',
+    };
+    const file = f.form_file instanceof File && f.form_file.size ? f.form_file : null;
+    if (file) {
+      if (file.size > MAX_FORM_BYTES) throw new Error(`The form must be ${kb(MAX_FORM_BYTES)} or smaller (this one is ${kb(file.size)}). Compress the PDF, or paste a link instead.`);
+      body.form_file = { name: file.name, type: file.type, data: await readFileBase64(file) };
+    } else if (f.form_url?.trim()) {
+      body.form_url = f.form_url.trim(); body.form_name = f.form_name;
+    } else if (f.remove_form === 'on') body.remove_form = true;
+    if (tr.id) await api(`/erp/trainings/${tr.id}`, { method: 'PUT', body });
+    else await api('/erp/trainings', { method: 'POST', body });
+    onSaved();
+  };
+  const del = async () => {
+    if (!sure) return setSure(true);
+    try { await api(`/erp/trainings/${tr.id}`, { method: 'DELETE' }); onSaved(); } catch (e) { setDelErr(e.message); }
+  };
+  return (
+    <Modal title={tr.id ? `Edit training` : 'Add training'} onClose={onClose}>
+      <ActionForm onSubmit={save} submitLabel={tr.id ? 'Save training' : 'Publish training'}>
+        <Field label="Training title"><input name="title" defaultValue={tr.title || ''} required placeholder="e.g. Mushroom cultivation" /></Field>
+        <div className="grid2f">
+          <Field label="Category"><select name="category" defaultValue={tr.category}>{TRAINING_CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+          <Field label="Who can apply"><input name="audience" list="audiences" defaultValue={tr.audience || ''} /></Field>
+        </div>
+        <datalist id="audiences">{AUDIENCES.map((a) => <option key={a} value={a} />)}</datalist>
+        <Field label="About the training"><textarea name="description" rows={3} defaultValue={tr.description || ''} placeholder="What farmers will learn, practicals, field visits…" /></Field>
+        <div className="grid3">
+          <Field label="Starts on"><input name="start_date" type="date" defaultValue={tr.start_date || ''} required /></Field>
+          <Field label="Ends on"><input name="end_date" type="date" defaultValue={tr.end_date || ''} /></Field>
+          <Field label="Last date to apply"><input name="last_date" type="date" defaultValue={tr.last_date || ''} /></Field>
+        </div>
+        <div className="grid3">
+          <Field label="Daily timing"><input name="timing" defaultValue={tr.timing || ''} placeholder="10:00 AM – 4:00 PM" /></Field>
+          <Field label="Seats"><input name="seats" type="number" min="0" step="1" defaultValue={tr.seats ?? ''} /></Field>
+          <Field label="Fee (₹, 0 = free)"><input name="fee" type="number" min="0" step="1" defaultValue={tr.fee ?? 0} /></Field>
+        </div>
+        <div className="grid2f">
+          <Field label="Venue"><input name="venue" defaultValue={tr.venue || ''} /></Field>
+          <Field label="Contact person / phone"><input name="contact" defaultValue={tr.contact || ''} placeholder="Dr. Kaur, 98xxxxxx10" /></Field>
+        </div>
+        <Field label="How to apply (one step per line)"><textarea name="steps" rows={5} defaultValue={(tr.steps || []).join('\n')} /></Field>
+        <Field label="Documents to bring (one per line)"><textarea name="documents" rows={5} defaultValue={(tr.documents || []).join('\n')} /></Field>
+        <fieldset className="formbox">
+          <legend>Application form for farmers to download</legend>
+          {tr.form && <p className="small">Current: <b>{tr.form.name}</b> {tr.form.url ? '(link)' : `(${kb(tr.form.size || 0)})`}</p>}
+          <Field label={`${tr.form ? 'Replace with a file' : 'Upload file'} (PDF, Word or photo, up to ${kb(MAX_FORM_BYTES)})`}>
+            <input name="form_file" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/*" />
+          </Field>
+          <div className="grid2f">
+            <Field label="…or paste a link to the form"><input name="form_url" type="url" placeholder="https://drive.google.com/…" /></Field>
+            <Field label="Link name"><input name="form_name" placeholder="Application form (PDF)" /></Field>
+          </div>
+          {tr.form && <label className="check"><input type="checkbox" name="remove_form" /> Remove the current form</label>}
+        </fieldset>
+        <label className="check"><input type="checkbox" name="active" defaultChecked={tr.active !== false} /> Show to farmers</label>
+      </ActionForm>
+      {tr.id && <div className="modal-foot">
+        {delErr && <div className="error">{delErr}</div>}
+        <button className="danger sm" onClick={del}>{sure ? 'Click again to delete for good' : 'Delete training'}</button>
+      </div>}
+    </Modal>
   );
 }

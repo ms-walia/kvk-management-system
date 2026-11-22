@@ -3,13 +3,14 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 import { api, setActiveKvk } from './api.js';
 import { auth, USE_EMULATOR } from './firebase.js';
 import { ActionForm, Field } from './ui.jsx';
-import { Dashboard, Bookings, Equipment, Stock, Farmers, Kvks, Staff } from './pages.jsx';
+import { Dashboard, Bookings, Equipment, Stock, Farmers, Kvks, Staff, Trainings } from './pages.jsx';
 
 const NAV = [
   ['dashboard', 'Dashboard', '▦'],
   ['bookings', 'Bookings', '📅'],
   ['equipment', 'Equipment', '🚜'],
   ['stock', 'Feeds & fertilizers', '🌱'],
+  ['trainings', 'Trainings', '🎓'],
   ['farmers', 'Farmers', '👩‍🌾'],
   ['staff', 'Staff', '👥'],
   ['kvks', 'All KVKs', '🗺'],
@@ -109,7 +110,7 @@ export default function App() {
   };
   const go = (p) => { location.hash = p; setMenu(false); };
 
-  const needsKvk = ['bookings', 'equipment', 'stock', 'farmers'].includes(page) && !activeKvk;
+  const needsKvk = ['bookings', 'equipment', 'stock', 'trainings', 'farmers'].includes(page) && !activeKvk;
   const nav = NAV.filter(([k]) => (k === 'kvks' ? isAdmin : k === 'staff' ? canEdit : true));
   const props = { go, kvkKey: activeKvk, canEdit, isAdmin };
 
@@ -143,6 +144,7 @@ export default function App() {
               {page === 'bookings' && <Bookings {...props} />}
               {page === 'equipment' && <Equipment {...props} />}
               {page === 'stock' && <Stock {...props} />}
+              {page === 'trainings' && <Trainings {...props} />}
               {page === 'farmers' && <Farmers {...props} />}
               {page === 'staff' && canEdit && <Staff {...props} />}
               {page === 'kvks' && isAdmin && <Kvks onPick={pickKvk} />}

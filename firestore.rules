@@ -93,6 +93,25 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/stock_items/$(request.resource.data.item_id)).data.kvk_id == request.resource.data.kvk_id;
     }
 
+    // ---- Training programmes: public schedule; any staff member of the KVK manages them ----
+    match /trainings/{id} {
+      allow read: if true;
+      allow create: if staffOf(request.resource.data.kvk_id) && request.resource.data.title is string
+        && request.resource.data.start_date is string && request.resource.data.end_date >= request.resource.data.start_date;
+      allow update: if staffOf(resource.data.kvk_id) && unchanged(['kvk_id', 'created_by', 'created_at'])
+        && request.resource.data.end_date >= request.resource.data.start_date;
+      allow delete: if staffOf(resource.data.kvk_id);
+    }
+    // Application form files (Spark plan has no Storage bucket): base64 in Firestore, one per training
+    match /training_forms/{id} {
+      allow read: if true;
+      allow create, update: if staffOf(request.resource.data.kvk_id)
+        && (resource == null || resource.data.kvk_id == request.resource.data.kvk_id)
+        && getAfter(/databases/$(database)/documents/trainings/$(id)).data.kvk_id == request.resource.data.kvk_id
+        && request.resource.data.data is string && request.resource.data.data.size() <= 960000;
+      allow delete: if staffOf(resource.data.kvk_id);
+    }
+
     // ---- Bookings ----
     match /bookings/{id} {
       allow read: if (signedIn() && resource.data.farmer_id == request.auth.uid) || staffOf(resource.data.kvk_id);

@@ -126,3 +126,8 @@ td > .badge:first-child { margin-left: 0; }
 button.link { padding-left: 0; color: var(--green-d); margin-top: 8px; }
 .setup-note { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 button.link.inline { display: inline; padding: 0; margin: 0; }
+.grid2f { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.formbox { border: 1px dashed var(--line, #d9d9d9); border-radius: 10px; padding: 10px 14px 4px; margin: 0; display: grid; gap: 10px; }
+.formbox legend { font-size: 13px; font-weight: 600; padding: 0 6px; }
+.formbox p { margin: 0; }
+.modal-foot { border-top: 1px solid var(--line, #eee); margin-top: 14px; padding-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
