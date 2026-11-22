@@ -209,3 +209,93 @@ test('first-time setup: only the first person can claim national admin', async (
   const st = await owner('/public/kvks/TN-CBE');
   assert.ok(st.stock.length > 0);
 });
+
+test('trainings: staff propose, manager approves; farmers see schedule, steps, documents and form', async () => {
+  const st = await staff('staff.ludhiana@kvk.in', 'staff1234');
+  const mt = await staff('manager.ludhiana@kvk.in', 'manager123');
+  // Seeded demo trainings are visible to anyone
+  let r = await call('GET', '/api/public/kvks/PB-LDH/trainings');
+  assert.equal(r.body.length, 5);
+  assert.ok(r.body.every((tr) => tr.registration_open && tr.form?.url));
+
+  const pdf = Buffer.from('%PDF-1.4 sample application form').toString('base64');
+  const body = {
+    title: 'Bee keeping', category: 'Horticulture', audience: 'Farmers', start_date: addDays(today, 8), end_date: addDays(today, 12), venue: '',
+    last_date: addDays(today, 5), timing: '10 AM – 4 PM', seats: '25', fee: '0',
+    steps: 'Download the form\nVisit the KVK office', documents: 'Aadhaar copy\n\nTwo photos\n',
+    form_file: { name: 'beekeeping-form.pdf', type: 'application/pdf', data: pdf },
+  };
+  r = await call('POST', '/api/erp/trainings', body, st);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const id = r.body.id;
+  assert.equal(r.body.status, 'proposed');
+  assert.deepEqual(r.body.documents, ['Aadhaar copy', 'Two photos']);
+  assert.equal(r.body.seats, 25);
+  assert.equal(r.body.form.name, 'beekeeping-form.pdf');
+  assert.equal(r.body.kvk_id, 'PB-LDH');
+
+  // A proposal is invisible to farmers until a manager approves it
+  const ft = await farmer('9876500001');
+  assert.equal((await call('GET', '/api/public/kvks/PB-LDH/trainings')).body.some((tr) => tr.id === id), false);
+  assert.equal((await call('GET', `/api/public/trainings/${id}`, null, ft)).status, 404);
+  await assert.rejects(getDoc(doc(ft.db, 'trainings', id)));
+  assert.equal((await call('POST', `/api/erp/trainings/${id}/approve`, null, st)).status, 403); // staff cannot approve
+  // Manager sends it back with a note; staff fixes it, which resubmits it
+  assert.equal((await call('POST', `/api/erp/trainings/${id}/reject`, {}, mt)).status, 400);
+  r = await call('POST', `/api/erp/trainings/${id}/reject`, { note: 'Add the venue' }, mt);
+  assert.equal(r.body.status, 'rejected');
+  r = await call('PUT', `/api/erp/trainings/${id}`, { venue: 'Seminar hall' }, st);
+  assert.equal(r.body.status, 'proposed');
+  assert.equal((await call('GET', '/api/erp/dashboard', null, mt)).body.trainings_proposed, 1);
+  r = await call('POST', `/api/erp/trainings/${id}/approve`, null, mt);
+  assert.equal(r.body.status, 'published');
+  // Staff cannot change or delete it once published, and cannot publish directly
+  assert.equal((await call('PUT', `/api/erp/trainings/${id}`, { title: 'Changed' }, st)).status, 403);
+  assert.equal((await call('DELETE', `/api/erp/trainings/${id}`, null, st)).status, 403);
+  await assert.rejects(updateDoc(doc(st.db, 'trainings', id), { title: 'Changed' }));
+  // Managers publish straight away
+  r = await call('POST', '/api/erp/trainings', { ...body, form_file: undefined, title: 'Kitchen gardening' }, mt);
+  assert.equal(r.body.status, 'published');
+  await call('DELETE', `/api/erp/trainings/${r.body.id}`, null, mt);
+
+  // Farmer (or anyone) reads details and downloads the exact file
+  r = await call('GET', `/api/public/trainings/${id}`, null, ft);
+  assert.equal(r.body.kvk.name, 'KVK Ludhiana');
+  assert.deepEqual(r.body.steps, ['Download the form', 'Visit the KVK office']);
+  r = await call('GET', `/api/public/trainings/${id}/form`);
+  assert.equal(r.body.data, pdf);
+  assert.equal(r.body.type, 'application/pdf');
+
+  // Replace the file with a link, then hide the training
+  r = await call('PUT', `/api/erp/trainings/${id}`, { form_url: 'https://example.org/form.pdf', form_name: 'Form (PDF)' }, mt);
+  assert.equal(r.body.form.url, 'https://example.org/form.pdf');
+  assert.equal((await getDoc(doc(mt.db, 'training_forms', id))).exists(), false);
+  r = await call('PUT', `/api/erp/trainings/${id}`, { active: false }, mt);
+  assert.equal((await call('GET', '/api/public/kvks/PB-LDH/trainings')).body.some((tr) => tr.id === id), false);
+
+  // Seats can be left empty
+  r = await call('POST', '/api/erp/trainings', { ...body, seats: '', form_file: undefined }, st);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.seats, null);
+  await call('DELETE', `/api/erp/trainings/${r.body.id}`, null, st);
+
+  // Validation
+  r = await call('POST', '/api/erp/trainings', { ...body, end_date: addDays(today, 1) }, st);
+  assert.equal(r.status, 400);
+  r = await call('POST', '/api/erp/trainings', { ...body, form_file: { name: 'x.exe', data: pdf } }, st);
+  assert.equal(r.status, 400);
+  const big = Buffer.alloc(800 * 1024).toString('base64');
+  r = await call('POST', '/api/erp/trainings', { ...body, form_file: { name: 'big.pdf', data: big } }, st);
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /KB or smaller/);
+
+  // Other KVKs and farmers cannot change it
+  const other = await staff('manager.karnal@kvk.in', 'manager123');
+  assert.equal((await call('PUT', `/api/erp/trainings/${id}`, { title: 'Hacked' }, other)).status, 403);
+  await assert.rejects(updateDoc(doc(ft.db, 'trainings', id), { title: 'Hacked' }));
+
+  // Delete removes it
+  r = await call('DELETE', `/api/erp/trainings/${id}`, null, mt);
+  assert.equal(r.status, 200);
+  assert.equal((await call('GET', `/api/public/trainings/${id}`)).status, 404);
+});

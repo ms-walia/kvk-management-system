@@ -3,8 +3,8 @@
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
-import { todayIST, addDays } from '../shared/backend.js';
-import { DEMO_KVKS as KVKS, DEMO_EQUIPMENT as EQUIPMENT, DEMO_STOCK as STOCK } from '../shared/demo-data.js';
+import { todayIST, addDays, demoTrainings } from '../shared/backend.js';
+import { DEMO_KVKS as KVKS, DEMO_EQUIPMENT as EQUIPMENT, DEMO_STOCK as STOCK, DEMO_TRAININGS, DEMO_TRAINING_DOCS, DEMO_TRAINING_STEPS } from '../shared/demo-data.js';
 
 if (!getApps().length) initializeApp({ projectId: process.env.GCLOUD_PROJECT || 'demo-kvk' });
 const db = getFirestore();
@@ -27,7 +27,7 @@ const FARMERS = [
 
 async function wipe() {
   await db.recursiveDelete(db.collection('config'));
-  for (const c of ['kvks', 'staff', 'farmers', 'equipment', 'stock_items', 'stock_movements', 'bookings']) {
+  for (const c of ['kvks', 'staff', 'farmers', 'equipment', 'stock_items', 'stock_movements', 'bookings', 'trainings', 'training_forms']) {
     await db.recursiveDelete(db.collection(c));
   }
   const { users } = await auth.listUsers(1000);
@@ -58,6 +58,7 @@ export async function seed() {
       if ((i + j) % 5 === 4 && i !== 0) return; // vary the catalogue per KVK
       batch.set(col.equipment().doc(`${code}-${key}`), { kvk_id: code, name: n, category, description, daily_rate, total_qty, max_days, active: true, holds: {}, created_at: t0 });
     });
+    for (const tr of demoTrainings(code, DEMO_TRAININGS, DEMO_TRAINING_DOCS, DEMO_TRAINING_STEPS, mgr)) batch.set(db.collection('trainings').doc(tr.id), tr.data);
     STOCK.forEach(([type, n, unit, q, price, reorder], j) => {
       const quantity = i === 0 ? q : Math.round((q * ((i + j) % 4)) / 2);
       const ref = col.stock().doc();

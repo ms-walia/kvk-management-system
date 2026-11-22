@@ -37,3 +37,33 @@ export const DEMO_STOCK = [
   ['seed', 'Wheat PBW 826 (certified)', 'kg', 1500, 45, 300],
   ['seed', 'Mustard RH 725', 'kg', 60, 120, 40],
 ];
+
+// Training programmes: [key, title, category, audience, starts in N days, length in days, timing, seats, fee, description]
+export const DEMO_TRAININGS = [
+  ['mushroom', 'Mushroom cultivation (button and oyster)', 'Horticulture', 'Farmers and rural youth', 12, 5, '10:00 AM – 4:00 PM', 30, 0,
+    'Hands-on training on compost making, spawning, casing and harvesting of button and oyster mushroom. Includes a visit to a working mushroom unit.'],
+  ['nursery', 'Fruit and vegetable nursery raising', 'Horticulture', 'Farmers, farm women', 20, 3, '9:30 AM – 3:30 PM', 25, 0,
+    'Seedling production in pro-trays, grafting and budding of fruit plants, and running a small nursery as a business.'],
+  ['ipm', 'Integrated pest management in wheat and paddy', 'Plant protection', 'Farmers', 6, 2, '10:00 AM – 1:00 PM', 40, 0,
+    'Identifying major pests and diseases, safe and correct use of pesticides, bio-agents and pheromone traps.'],
+  ['dairy', 'Scientific dairy farming', 'Animal husbandry', 'Farmers and rural youth', 30, 10, '10:00 AM – 4:00 PM', 30, 0,
+    'Breed selection, balanced feeding, clean milk production, common diseases and vaccination schedule, and dairy loans.'],
+  ['students', 'Student agri-internship: crop production basics', 'Agriculture', 'Students (Class 11 and above)', 40, 15, '9:00 AM – 1:00 PM', 20, 0,
+    'Field-based programme for students: soil testing, seed treatment, sowing, irrigation scheduling and record keeping on the KVK farm.'],
+];
+
+export const DEMO_TRAINING_DOCS = [
+  'Filled application form (download below)',
+  'Aadhaar card (original and one photocopy)',
+  'Two passport-size photographs',
+  'Land record / Jamabandi copy, if you are a farmer',
+  'School or college ID card, for students',
+];
+
+export const DEMO_TRAINING_STEPS = [
+  'Download the application form below and print it (or collect a printed copy from the KVK office).',
+  'Fill in the form in capital letters and paste your photograph.',
+  'Visit the KVK office before the last date with the filled form and the documents listed here.',
+  'KVK staff check your documents and register you. Seats are given first come, first served.',
+  'You will get a call or SMS confirming your seat before the training starts.',
+];

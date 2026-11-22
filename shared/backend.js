@@ -5,7 +5,7 @@
 // Usage: const api = createBackend(firebaseApp); await api('/erp/bookings?status=active')
 import {
   getFirestore, collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, runTransaction,
-  writeBatch, getCountFromServer, deleteField, increment,
+  writeBatch, getCountFromServer, deleteField, increment, deleteDoc,
 } from 'firebase/firestore';
 import { getAuth, initializeAuth, inMemoryPersistence, createUserWithEmailAndPassword, signOut, connectAuthEmulator } from 'firebase/auth';
 
@@ -74,8 +74,31 @@ const EQUIP_FIELDS = ['name', 'category', 'description', 'daily_rate', 'total_qt
 const STOCK_FIELDS = ['type', 'name', 'unit', 'price_per_unit', 'reorder_level', 'certified', 'active'];
 const KVK_FIELDS = ['code', 'name', 'state', 'district', 'address', 'phone', 'host_institution', 'active'];
 const PROFILE_FIELDS = ['name', 'village', 'district', 'state', 'kvk_id', 'id_type', 'id_last4', 'land_acres'];
+export const TRAINING_CATEGORIES = ['Agriculture', 'Horticulture', 'Plant protection', 'Soil science', 'Animal husbandry', 'Fisheries', 'Home science', 'Agricultural engineering', 'Agri-business', 'Other'];
+const TRAINING_FIELDS = ['title', 'category', 'audience', 'description', 'start_date', 'end_date', 'timing', 'venue', 'seats', 'fee', 'last_date', 'contact', 'documents', 'steps', 'active'];
+export const MAX_FORM_BYTES = 700 * 1024; // keeps the base64 copy under Firestore's 1 MiB document limit
+const FORM_EXT = /\.(pdf|docx?|jpe?g|png)$/i;
+const byStart = (a, b) => a.start_date.localeCompare(b.start_date) || a.title.localeCompare(b.title);
 const byCatName = (a, b) => (a.category || a.type || '').localeCompare(b.category || b.type || '') || a.name.localeCompare(b.name);
 const stockLevel = (s) => (s.quantity <= 0 ? 'out' : s.quantity <= s.reorder_level ? 'low' : 'in');
+
+/** Sample training docs for one KVK; dates are relative to today. Shared by the demo-data route and the emulator seed. */
+export function demoTrainings(code, rows, documents, steps, by) {
+  const today = todayIST();
+  return rows.map(([key, title, category, audience, inDays, len, timing, seats, fee, description]) => {
+    const start_date = addDays(today, inDays);
+    return {
+      id: `${code}-tr-${key}`,
+      data: {
+        kvk_id: code, title, category, audience, description, timing, seats, fee,
+        start_date, end_date: addDays(start_date, len - 1), last_date: addDays(start_date, -2),
+        venue: 'KVK training hall', contact: null, documents, steps, active: true, status: 'published', review_note: null,
+        form: { name: 'KVK training application form (PDF)', url: '/forms/kvk-training-application-form.pdf' },
+        created_by: by, created_at: now(), updated_at: now(),
+      },
+    };
+  });
+}
 
 /** Firestore permission errors become friendly 403s. */
 function friendly(e) {
@@ -300,18 +323,19 @@ export function createBackend(app) {
         by_state: Object.entries(byState).map(([state, n]) => ({ state, kvks: n })).sort((a, b) => b.kvks - a.kvks),
       };
     }
-    const [k, fv, fp, act, stock, monthDone] = await Promise.all([
+    const [k, fv, fp, act, stock, monthDone, trProposed] = await Promise.all([
       one('kvks', kvk),
       count(query(F, where('kvk_id', '==', kvk), where('status', '==', 'verified'))),
       count(query(F, where('kvk_id', '==', kvk), where('status', '==', 'pending'))),
       list(query(B, where('kvk_id', '==', kvk), where('status', 'in', ['requested', 'approved', 'issued']))),
       list(query(C('stock_items'), where('kvk_id', '==', kvk), where('active', '==', true))),
       list(query(B, where('kvk_id', '==', kvk), where('status', 'in', ['issued', 'returned']), where('start_date', '>=', monthStart))),
+      count(query(C('trainings'), where('kvk_id', '==', kvk), where('status', '==', 'proposed'))),
     ]);
     const mini = ({ id, ref, qty, start_date, end_date, equipment_name, farmer_name, phone }) => ({ id, ref, qty, start_date, end_date, equipment_name, farmer_name, phone });
     return {
       scope: 'kvk', kvk: { id: k.id, name: k.name, code: k.code, state: k.state, district: k.district },
-      farmers_verified: fv, farmers_pending: fp,
+      farmers_verified: fv, farmers_pending: fp, trainings_proposed: trProposed,
       bookings_requested: act.filter((b) => b.status === 'requested').length,
       equipment_out: act.filter((b) => b.status === 'issued').reduce((n, b) => n + b.qty, 0),
       overdue: act.filter((b) => b.status === 'issued' && b.end_date < today).length,
@@ -604,6 +628,164 @@ export function createBackend(app) {
     };
   }));
 
+  // ======================= TRAININGS =======================
+  // KVK staff publish training programmes (agriculture, horticulture, student programmes…).
+  // Farmers see the schedule, how to apply, the documents to bring, and download the application
+  // form. Registration itself happens in person at the KVK office.
+  // Spark plan has no Cloud Storage bucket, so an uploaded form is stored base64-encoded in its own
+  // Firestore document (training_forms/{trainingId}, max ~700 KB file); staff can instead give a link.
+  // Managers and admins publish directly. Staff submit proposals that a manager approves or rejects.
+  // Farmers only ever see status == 'published' (the rules enforce this too).
+  const publicTraining = (tr) => ({ ...tr, registration_open: (tr.last_date || tr.start_date) >= todayIST() });
+  const isManager = (s) => s.role !== 'staff';
+  /** Published trainings only; a proposal reads as "not found" to the public. */
+  async function publishedTraining(id) {
+    let tr = null;
+    try { tr = await one('trainings', id); } catch (e) { if (e?.code !== 'permission-denied') throw e; }
+    if (!tr || !tr.active || tr.status !== 'published') throw notFound('Training not found');
+    return tr;
+  }
+
+  route('GET', '/public/kvks/:id/trainings', async ({ p }) => {
+    const today = todayIST();
+    return (await list(query(C('trainings'), where('kvk_id', '==', p.id), where('status', '==', 'published'), where('active', '==', true))))
+      .filter((tr) => tr.end_date >= today).sort(byStart).map(publicTraining);
+  });
+
+  route('GET', '/public/trainings/:id', async ({ p }) => {
+    const tr = await publishedTraining(p.id);
+    const k = await one('kvks', tr.kvk_id);
+    return { ...publicTraining(tr), kvk: k && { id: k.id, name: k.name, address: k.address, phone: k.phone, district: k.district, state: k.state } };
+  });
+
+  route('GET', '/public/trainings/:id/form', async ({ p }) => {
+    const tr = await publishedTraining(p.id);
+    if (!tr.form) throw notFound('No form uploaded for this training');
+    if (tr.form.url) return { name: tr.form.name, url: tr.form.url };
+    const f = await one('training_forms', p.id);
+    if (!f) throw notFound('No form uploaded for this training');
+    return { name: f.name, type: f.type, data: f.data };
+  });
+
+  route('GET', '/erp/trainings', async ({ q }) => {
+    const s = await staffMe();
+    const today = todayIST();
+    const rows = await list(query(C('trainings'), where('kvk_id', '==', kvkOf(s))));
+    if (q.when === 'proposals') return rows.filter((tr) => tr.status !== 'published' && tr.end_date >= today).sort(byStart);
+    return q.when === 'past' ? rows.filter((tr) => tr.end_date < today).sort((a, b) => byStart(b, a))
+      : rows.filter((tr) => tr.end_date >= today).sort(byStart);
+  });
+
+  /** Validates a training body; returns { data, form } where form is a file to store, a link, 'remove' or undefined. */
+  function trainingInput(body, cur = {}) {
+    const b = pick(body, TRAINING_FIELDS);
+    const next = { ...cur, ...b };
+    if (!next.title || String(next.title).trim().length < 3) throw bad('Please enter a training title');
+    if (!TRAINING_CATEGORIES.includes(next.category)) throw bad('Choose a category');
+    parseDate(next.start_date, 'Start date'); parseDate(next.end_date, 'End date');
+    if (next.end_date < next.start_date) throw bad('End date must be on or after the start date');
+    if (next.last_date) { parseDate(next.last_date, 'Last date to apply'); if (next.last_date > next.end_date) throw bad('Last date to apply must be before the training ends'); }
+    const opt = (v) => (v === '' || v === null ? undefined : v);
+    numOk(opt(next.seats), 'Seats', { int: true }); numOk(opt(next.fee), 'Fee');
+    const lines = (v) => (Array.isArray(v) ? v : String(v || '').split('\n')).map((x) => String(x).trim()).filter(Boolean).slice(0, 30);
+    const data = {
+      ...b,
+      ...('title' in b ? { title: String(b.title).trim() } : {}),
+      ...('documents' in b ? { documents: lines(b.documents) } : {}),
+      ...('steps' in b ? { steps: lines(b.steps) } : {}),
+      ...('seats' in b ? { seats: b.seats === '' || b.seats == null ? null : Number(b.seats) } : {}),
+      ...('fee' in b ? { fee: b.fee === '' || b.fee == null ? 0 : Number(b.fee) } : {}),
+      ...('last_date' in b ? { last_date: b.last_date || null } : {}),
+      ...('active' in b ? { active: b.active === true || b.active === 'on' } : {}),
+    };
+    let form;
+    if (body?.remove_form) form = 'remove';
+    if (body?.form_file) {
+      const { name, type, data: b64 } = body.form_file;
+      if (!name || typeof b64 !== 'string') throw bad('The form file could not be read');
+      if (!FORM_EXT.test(name)) throw bad('Upload the form as PDF, Word (DOC/DOCX) or an image (JPG/PNG)');
+      const bytes = Math.floor((b64.length * 3) / 4);
+      if (bytes > MAX_FORM_BYTES) throw bad(`The form must be ${Math.round(MAX_FORM_BYTES / 1024)} KB or smaller (this one is ${Math.round(bytes / 1024)} KB). Compress the PDF, or paste a link instead.`);
+      form = { name: String(name).slice(0, 120), type: type || 'application/octet-stream', data: b64, size: bytes };
+    } else if (body?.form_url) {
+      const url = String(body.form_url).trim();
+      if (!/^(https?:\/\/|\/)\S+$/.test(url)) throw bad('The form link must start with https://');
+      form = { url, name: String(body.form_name || '').trim() || url.split('/').pop().split('?')[0] || 'Application form' };
+    }
+    return { data, form };
+  }
+
+  /** Writes the training and its form (if any) in one batch. */
+  function writeTraining(batch, ref, kvk, form, cur = null) {
+    const hadFile = !!(cur?.form && !cur.form.url);
+    if (hadFile && (form === 'remove' || form?.url)) batch.delete(D('training_forms', ref.id));
+    if (form?.data) batch.set(D('training_forms', ref.id), { kvk_id: kvk, name: form.name, type: form.type, data: form.data, size: form.size, updated_at: now() });
+    if (form === 'remove') return { form: null };
+    if (form?.url) return { form: { name: form.name, url: form.url } };
+    if (form?.data) return { form: { name: form.name, type: form.type, size: form.size } };
+    return {};
+  }
+
+  route('POST', '/erp/trainings', async ({ body }) => {
+    const s = await staffMe();
+    const kvk = kvkOf(s);
+    const { data, form } = trainingInput(body);
+    const ref = doc(C('trainings'));
+    const batch = writeBatch(db);
+    const formField = writeTraining(batch, ref, kvk, form);
+    batch.set(ref, {
+      category: 'Agriculture', audience: null, description: null, timing: null, venue: null, seats: null, fee: 0, last_date: null,
+      contact: null, documents: [], steps: [], active: true, form: null,
+      ...data, ...formField, kvk_id: kvk, created_by: s.id, created_by_name: s.name || null, created_at: now(), updated_at: now(),
+      status: isManager(s) ? 'published' : 'proposed', review_note: null,
+    });
+    await batch.commit();
+    return one('trainings', ref.id);
+  });
+
+  route('PUT', '/erp/trainings/:id', async ({ p, body }) => {
+    const s = await staffMe();
+    const cur = owned(s, await one('trainings', p.id));
+    if (!isManager(s) && cur.status === 'published') throw forbidden('Only a KVK manager can change a published training');
+    const { data, form } = trainingInput(body, cur);
+    const ref = D('trainings', cur.id);
+    const batch = writeBatch(db);
+    const formField = writeTraining(batch, ref, cur.kvk_id, form, cur);
+    // A staff member editing a rejected proposal sends it back for approval.
+    const resubmit = !isManager(s) && cur.status === 'rejected' ? { status: 'proposed', review_note: null } : {};
+    batch.update(ref, { ...data, ...formField, ...resubmit, updated_at: now() });
+    await batch.commit();
+    return one('trainings', cur.id);
+  });
+
+  route('DELETE', '/erp/trainings/:id', async ({ p }) => {
+    const s = await staffMe();
+    const cur = owned(s, await one('trainings', p.id));
+    if (!isManager(s) && cur.status === 'published') throw forbidden('Only a KVK manager can delete a published training');
+    if (cur.form && !cur.form.url) await deleteDoc(D('training_forms', cur.id));
+    await deleteDoc(D('trainings', cur.id));
+    return { ok: true };
+  });
+
+  route('POST', '/erp/trainings/:id/approve', async ({ p }) => {
+    const s = await staffMe();
+    managerUp(s);
+    const cur = owned(s, await one('trainings', p.id));
+    if (cur.status === 'published') throw bad('This training is already published');
+    await updateDoc(D('trainings', cur.id), { status: 'published', review_note: null, decided_by: s.id, decided_at: now(), updated_at: now() });
+    return one('trainings', cur.id);
+  });
+
+  route('POST', '/erp/trainings/:id/reject', async ({ p, body }) => {
+    const s = await staffMe();
+    managerUp(s);
+    const cur = owned(s, await one('trainings', p.id));
+    if (cur.status !== 'proposed') throw bad('Only proposals waiting for approval can be sent back');
+    if (!body?.note) throw bad('Please say what needs to change, so the staff member can fix it');
+    await updateDoc(D('trainings', cur.id), { status: 'rejected', review_note: String(body.note), decided_by: s.id, decided_at: now(), updated_at: now() });
+    return one('trainings', cur.id);
+  });
+
   // ======================= first-time setup =======================
   route('GET', '/setup/status', async () => ({ done: (await getDoc(D('config', 'setup'))).exists() }));
 
@@ -623,7 +805,7 @@ export function createBackend(app) {
   route('POST', '/erp/demo-data', async () => {
     const s = await staffMe();
     if (!isAdmin(s)) throw forbidden('Only national admins can do this');
-    const { DEMO_KVKS, DEMO_EQUIPMENT, DEMO_STOCK } = await import('./demo-data.js');
+    const { DEMO_KVKS, DEMO_EQUIPMENT, DEMO_STOCK, DEMO_TRAININGS, DEMO_TRAINING_DOCS, DEMO_TRAINING_STEPS } = await import('./demo-data.js');
     let made = 0;
     for (const [i, [code, name, state, district, address, phone, host]] of DEMO_KVKS.entries()) {
       if ((await getDoc(D('kvks', code))).exists()) continue;
@@ -643,7 +825,15 @@ export function createBackend(app) {
       await batch.commit();
       made++;
     }
-    return { kvks_created: made };
+    // Sample trainings for every demo KVK (also added to KVKs created by an earlier run).
+    let trainings = 0;
+    for (const [code] of DEMO_KVKS) {
+      if ((await getDoc(D('trainings', `${code}-tr-${DEMO_TRAININGS[0][0]}`))).exists()) continue;
+      const batch = writeBatch(db);
+      for (const row of demoTrainings(code, DEMO_TRAININGS, DEMO_TRAINING_DOCS, DEMO_TRAINING_STEPS, s.id)) { batch.set(D('trainings', row.id), row.data); trainings++; }
+      await batch.commit();
+    }
+    return { kvks_created: made, trainings_created: trainings };
   });
 
   // ======================= dispatcher =======================

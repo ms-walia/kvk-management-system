@@ -14,7 +14,7 @@
       "destination": "/erp/index.html"
     },
     {
-      "source": "/:path((?!assets/|erp/|sw.js|manifest.webmanifest|icon.svg).*)",
+      "source": "/:path((?!assets/|erp/|forms/|sw.js|manifest.webmanifest|icon.svg).*)",
       "destination": "/index.html"
     }
   ],

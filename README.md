@@ -19,6 +19,10 @@ Both apps use the same data layer, `shared/backend.js`, which talks to Firestore
 - **Equipment**: catalogue with daily rent, units owned, max days per booking; 14-day availability calendar per machine.
 - **Bookings**: approve (capacity checked, no double booking even if two staff click at once), reject with reason, hand over, mark returned with condition. Early returns free up remaining days.
 - **Feeds, fertilizers, seeds**: stock levels with reorder alerts; receive/issue/write-off with a full movement log.
+- **Trainings**: managers and admins publish training programmes for their KVK straight away; staff propose
+  trainings, which a manager approves or sends back with a note (shown on the dashboard and in a Proposals tab).
+  Each training (agriculture, horticulture, animal husbandry, student programmes…) has dates, daily timing, last date to apply, seats, fee, venue, the "how to apply"
+  steps, the documents to bring, and the application form (upload a PDF/Word/photo up to 700 KB, or paste a link).
 - **Farmers**: verification queue (check Aadhaar/land record in person, then verify or reject with a reason).
 - **Staff**: managers add staff for their KVK; admins add managers and admins.
 
@@ -28,16 +32,23 @@ Both apps use the same data layer, `shared/backend.js`, which talks to Firestore
 - Pick state → district → KVK. See every machine's availability for the next week and for chosen dates.
 - See feed/fertilizer/seed stock (in stock / few left / out) and prices.
 - Complete profile → KVK verifies → book machines; track and cancel bookings.
+- **Trainings** (no sign-in needed): upcoming trainings at the KVK with timings and last date to apply. Each one shows
+  how to apply, the documents needed, and a button to download the application form. Registration itself happens in
+  person at the KVK office.
 
 ## Data & security
 
-- Firestore collections: `kvks`, `staff`, `farmers`, `equipment`, `stock_items`, `stock_movements`, `bookings`, `config`.
+- Firestore collections: `kvks`, `staff`, `farmers`, `equipment`, `stock_items`, `stock_movements`, `bookings`, `trainings`, `training_forms`, `config`.
 - `firestore.rules` enforces everything: staff only see their own KVK; only managers edit the catalogue and prices;
   farmers can only edit their own profile and can never verify themselves; only verified farmers can create a booking,
   only as `requested`, only at their own KVK; stock can never go negative.
 - No double booking: approved bookings are recorded as "holds" on the equipment document (dates and quantity only, no
   personal data), and approvals run in a Firestore transaction on that document, so two staff approving the same machine
   at the same moment cannot both succeed.
+- Training application forms: the free Spark plan has no Cloud Storage bucket, so an uploaded form is stored
+  base64-encoded in its own Firestore document `training_forms/{trainingId}` (one per training, max 700 KB file so it
+  stays under Firestore's 1 MiB document limit). The training list never loads these, only the Download button does.
+  Bigger forms can be given as a link (Google Drive etc.). A sample form ships at `/forms/kvk-training-application-form.pdf`.
 - Roles: `admin` (national), `manager` (one KVK, edits catalogue and staff), `staff` (one KVK, day-to-day operations).
 - First admin: on a fresh project the ERP sign-in page offers "Set up the national admin" once; the rules lock it after that.
 

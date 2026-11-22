@@ -40,7 +40,7 @@ function Login({ onBrowse }) {
         <h1>{t('app')}</h1>
         <p className="tagline">{t('tagline')}</p>
         <ul className="features desk-only">
-          <li>🚜 {t('f1')}</li><li>🌱 {t('f2')}</li><li>✅ {t('f3')}</li>
+          <li>🚜 {t('f1')}</li><li>🌱 {t('f2')}</li><li>🎓 {t('f4')}</li><li>✅ {t('f3')}</li>
         </ul>
       </div>
       <div className="sheet">
@@ -222,6 +222,114 @@ function StockTab({ kvk }) {
   );
 }
 
+// ---------------- Trainings tab ----------------
+// KVK training programmes. Farmers read the timings, how to apply and the documents needed,
+// download the application form, and register in person at the KVK office.
+const CAT_ICON = { Agriculture: '🌾', Horticulture: '🍅', 'Plant protection': '🐛', 'Soil science': '🧪', 'Animal husbandry': '🐄', Fisheries: '🐟', 'Home science': '🏠', 'Agricultural engineering': '⚙️', 'Agri-business': '💼' };
+
+function dateRange(tr, lang) {
+  return tr.end_date !== tr.start_date ? `${fmtDate(tr.start_date, lang)} – ${fmtDate(tr.end_date, lang)}` : fmtDate(tr.start_date, lang);
+}
+
+async function downloadForm(tr) {
+  const f = await api(`/public/trainings/${tr.id}/form`);
+  if (f.url) { window.open(f.url, '_blank', 'noopener'); return; }
+  const bin = atob(f.data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: f.type || 'application/octet-stream' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: f.name || 'application-form' });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function TrainingsTab({ kvkId, onOpen }) {
+  const { t, lang } = useApp();
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(null);
+  const [cat, setCat] = useState('');
+  useEffect(() => { setRows(null); api(`/public/kvks/${kvkId}/trainings`).then(setRows).catch((e) => { setErr(e.message); setRows([]); }); }, [kvkId]);
+  if (!rows) return <div className="muted">…</div>;
+  const cats = [...new Set(rows.map((r) => r.category))];
+  const shown = rows.filter((r) => !cat || r.category === cat);
+  const now = today();
+  return (
+    <>
+      <div className="note-box">🏢 {t('trRegisterAtKvk')}</div>
+      {err && <div className="err">{err === 'offline' ? t('offline') : err}</div>}
+      {cats.length > 1 && <div className="chips wrap">
+        <button className={!cat ? 'chip on' : 'chip'} onClick={() => setCat('')}>{t('allMachines')}</button>
+        {cats.map((c) => <button key={c} className={cat === c ? 'chip on' : 'chip'} onClick={() => setCat(c)}>{CAT_ICON[c] || '📘'} {c}</button>)}
+      </div>}
+      {!shown.length ? <div className="empty">{t('trNone')}</div> : <div className="grid-cards">{shown.map((tr) => (
+        <button key={tr.id} className="card training" onClick={() => onOpen(tr)}>
+          <div className="tr-cat">{CAT_ICON[tr.category] || '📘'} {tr.category}{tr.start_date <= now && <span className="tr-live">{t('trRunning')}</span>}</div>
+          <b className="tr-title">{tr.title}</b>
+          <div className="tr-meta">📅 {dateRange(tr, lang)}{tr.timing && <> · 🕙 {tr.timing}</>}</div>
+          {tr.audience && <div className="tr-meta">👥 {tr.audience}</div>}
+          <div className="tr-foot">
+            <span className={tr.registration_open ? 'ok small' : 'no small'}>
+              {tr.registration_open ? (tr.last_date ? t('trApplyBy', { d: fmtDate(tr.last_date, lang) }) : t('trOpen')) : t('trClosed')}
+            </span>
+            <span className="tr-more">{t('trHowToApply')} ›</span>
+          </div>
+        </button>
+      ))}</div>}
+    </>
+  );
+}
+
+function TrainingSheet({ training, kvk, onClose }) {
+  const { t, lang } = useApp();
+  const [tr, setTr] = useState(training);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => { api(`/public/trainings/${training.id}`).then(setTr).catch(() => {}); }, [training.id]);
+  const k = tr.kvk || kvk;
+  const dl = async () => { setBusy(true); setErr(null); try { await downloadForm(tr); } catch (e) { setErr(e.message); } finally { setBusy(false); } };
+  const steps = tr.steps?.length ? tr.steps : [t('trStep1'), t('trStep2'), t('trStep3')];
+  return (
+    <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="bottom-sheet tall" role="dialog" aria-label={tr.title}>
+        <div className="sheet-head"><div className="tr-cat">{CAT_ICON[tr.category] || '📘'} {tr.category}</div><button className="x" onClick={onClose} aria-label="Close">✕</button></div>
+        <h3 className="tr-h">{tr.title}</h3>
+        {tr.description && <p className="tr-desc">{tr.description}</p>}
+
+        <div className="facts">
+          <div><span>{t('trDates')}</span><b>{dateRange(tr, lang)}</b></div>
+          {tr.timing && <div><span>{t('trTiming')}</span><b>{tr.timing}</b></div>}
+          {tr.last_date && <div><span>{t('trLastDate')}</span><b className={tr.registration_open ? '' : 'no'}>{fmtDate(tr.last_date, lang)}</b></div>}
+          <div><span>{t('trFee')}</span><b>{tr.fee ? inr(tr.fee) : t('trFree')}</b></div>
+          {tr.seats ? <div><span>{t('trSeats')}</span><b>{tr.seats}</b></div> : null}
+          {tr.audience && <div><span>{t('trWho')}</span><b>{tr.audience}</b></div>}
+          {tr.venue && <div className="wide"><span>{t('trVenue')}</span><b>{tr.venue}{k?.name ? `, ${k.name}` : ''}</b></div>}
+        </div>
+
+        {!tr.registration_open && <div className="err">{t('trClosedLong')}</div>}
+
+        <h4>📝 {t('trHowToApply')}</h4>
+        <ol className="steps">{steps.map((st, i) => <li key={i}>{st}</li>)}</ol>
+        <div className="note-box">🏢 {t('trRegisterAtKvk')}</div>
+
+        <h4>📂 {t('trDocs')}</h4>
+        {tr.documents?.length ? <ul className="docs">{tr.documents.map((d, i) => <li key={i}>{d}</li>)}</ul> : <p className="muted small">{t('trDocsAsk')}</p>}
+
+        <h4>📄 {t('trForm')}</h4>
+        {tr.form ? <>
+          <button className="btn" onClick={dl} disabled={busy}>{busy ? '…' : `⬇ ${t('trDownload')}`}</button>
+          <div className="hint">{tr.form.name}{tr.form.size ? ` · ${Math.max(1, Math.round(tr.form.size / 1024))} KB` : ''}</div>
+        </> : <p className="muted small">{t('trNoForm')}</p>}
+        {err && <div className="err">{err}</div>}
+
+        {k && <div className="kvk-contact">
+          <div><b>{k.name}</b><div className="muted small">{k.address}</div>{tr.contact && <div className="small">{t('trContact')}: {tr.contact}</div>}</div>
+          {k.phone && <a className="btn sm" href={`tel:${k.phone}`}>📞 {t('call')}</a>}
+        </div>}
+      </div>
+    </div>
+  );
+}
+
 // ---------------- Bookings tab ----------------
 function BookingsTab() {
   const { t, lang } = useApp();
@@ -300,6 +408,7 @@ export default function App() {
   const [tab, setTab] = useState('machines');
   const [kvk, setKvk] = useState(null);
   const [booking, setBooking] = useState(null);
+  const [training, setTraining] = useState(null);
   const [toast, setToast] = useState(null);
 
   useEffect(() => onAuthStateChanged(auth, async (u) => {
@@ -323,8 +432,8 @@ export default function App() {
     setBooking({ item, start, end });
   };
 
-  const tabs = farmer ? [['machines', '🚜', t('equipment')], ['stock', '🌱', t('stock')], ['bookings', '📋', t('bookings')], ['profile', '👤', t('profile')]]
-    : [['machines', '🚜', t('equipment')], ['stock', '🌱', t('stock')]];
+  const tabs = farmer ? [['machines', '🚜', t('equipment')], ['stock', '🌱', t('stock')], ['trainings', '🎓', t('trainings')], ['bookings', '📋', t('bookings')], ['profile', '👤', t('profile')]]
+    : [['machines', '🚜', t('equipment')], ['stock', '🌱', t('stock')], ['trainings', '🎓', t('trainings')]];
 
   return (
     <Ctx.Provider value={ctx}>
@@ -370,12 +479,14 @@ export default function App() {
                 <Machines kvkId={kvkId} onBook={startBooking} />
               </>
             : tab === 'stock' ? (kvk ? <StockTab kvk={kvk} /> : null)
+            : tab === 'trainings' ? <TrainingsTab kvkId={kvkId} onOpen={setTraining} />
             : tab === 'bookings' ? <BookingsTab /> : null}
         </main>
         <nav className="tabbar">{tabs.map(([k, icon, label]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><span>{icon}</span>{label}</button>
         ))}</nav>
         {booking && <BookSheet {...booking} onClose={() => setBooking(null)} onDone={() => { setBooking(null); setToast(t('requested')); setTab('bookings'); }} />}
+        {training && <TrainingSheet training={training} kvk={kvk} onClose={() => setTraining(null)} />}
         {toast && <div className="toast" onAnimationEnd={() => setToast(null)}>{toast}</div>}
         <footer className="site-foot desk-only">🌾 {t('app')} · {t('tagline')}</footer>
       </div>
