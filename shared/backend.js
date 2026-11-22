@@ -92,7 +92,7 @@ export function demoTrainings(code, rows, documents, steps, by) {
       data: {
         kvk_id: code, title, category, audience, description, timing, seats, fee,
         start_date, end_date: addDays(start_date, len - 1), last_date: addDays(start_date, -2),
-        venue: 'KVK training hall', contact: null, documents, steps, active: true,
+        venue: 'KVK training hall', contact: null, documents, steps, active: true, status: 'published', review_note: null,
         form: { name: 'KVK training application form (PDF)', url: '/forms/kvk-training-application-form.pdf' },
         created_by: by, created_at: now(), updated_at: now(),
       },
@@ -323,18 +323,19 @@ export function createBackend(app) {
         by_state: Object.entries(byState).map(([state, n]) => ({ state, kvks: n })).sort((a, b) => b.kvks - a.kvks),
       };
     }
-    const [k, fv, fp, act, stock, monthDone] = await Promise.all([
+    const [k, fv, fp, act, stock, monthDone, trProposed] = await Promise.all([
       one('kvks', kvk),
       count(query(F, where('kvk_id', '==', kvk), where('status', '==', 'verified'))),
       count(query(F, where('kvk_id', '==', kvk), where('status', '==', 'pending'))),
       list(query(B, where('kvk_id', '==', kvk), where('status', 'in', ['requested', 'approved', 'issued']))),
       list(query(C('stock_items'), where('kvk_id', '==', kvk), where('active', '==', true))),
       list(query(B, where('kvk_id', '==', kvk), where('status', 'in', ['issued', 'returned']), where('start_date', '>=', monthStart))),
+      count(query(C('trainings'), where('kvk_id', '==', kvk), where('status', '==', 'proposed'))),
     ]);
     const mini = ({ id, ref, qty, start_date, end_date, equipment_name, farmer_name, phone }) => ({ id, ref, qty, start_date, end_date, equipment_name, farmer_name, phone });
     return {
       scope: 'kvk', kvk: { id: k.id, name: k.name, code: k.code, state: k.state, district: k.district },
-      farmers_verified: fv, farmers_pending: fp,
+      farmers_verified: fv, farmers_pending: fp, trainings_proposed: trProposed,
       bookings_requested: act.filter((b) => b.status === 'requested').length,
       equipment_out: act.filter((b) => b.status === 'issued').reduce((n, b) => n + b.qty, 0),
       overdue: act.filter((b) => b.status === 'issued' && b.end_date < today).length,
@@ -633,24 +634,33 @@ export function createBackend(app) {
   // form. Registration itself happens in person at the KVK office.
   // Spark plan has no Cloud Storage bucket, so an uploaded form is stored base64-encoded in its own
   // Firestore document (training_forms/{trainingId}, max ~700 KB file); staff can instead give a link.
+  // Managers and admins publish directly. Staff submit proposals that a manager approves or rejects.
+  // Farmers only ever see status == 'published' (the rules enforce this too).
   const publicTraining = (tr) => ({ ...tr, registration_open: (tr.last_date || tr.start_date) >= todayIST() });
+  const isManager = (s) => s.role !== 'staff';
+  /** Published trainings only; a proposal reads as "not found" to the public. */
+  async function publishedTraining(id) {
+    let tr = null;
+    try { tr = await one('trainings', id); } catch (e) { if (e?.code !== 'permission-denied') throw e; }
+    if (!tr || !tr.active || tr.status !== 'published') throw notFound('Training not found');
+    return tr;
+  }
 
   route('GET', '/public/kvks/:id/trainings', async ({ p }) => {
     const today = todayIST();
-    return (await list(query(C('trainings'), where('kvk_id', '==', p.id), where('active', '==', true))))
+    return (await list(query(C('trainings'), where('kvk_id', '==', p.id), where('status', '==', 'published'), where('active', '==', true))))
       .filter((tr) => tr.end_date >= today).sort(byStart).map(publicTraining);
   });
 
   route('GET', '/public/trainings/:id', async ({ p }) => {
-    const tr = await one('trainings', p.id);
-    if (!tr || !tr.active) throw notFound('Training not found');
+    const tr = await publishedTraining(p.id);
     const k = await one('kvks', tr.kvk_id);
     return { ...publicTraining(tr), kvk: k && { id: k.id, name: k.name, address: k.address, phone: k.phone, district: k.district, state: k.state } };
   });
 
   route('GET', '/public/trainings/:id/form', async ({ p }) => {
-    const tr = await one('trainings', p.id);
-    if (!tr?.form) throw notFound('No form uploaded for this training');
+    const tr = await publishedTraining(p.id);
+    if (!tr.form) throw notFound('No form uploaded for this training');
     if (tr.form.url) return { name: tr.form.name, url: tr.form.url };
     const f = await one('training_forms', p.id);
     if (!f) throw notFound('No form uploaded for this training');
@@ -661,6 +671,7 @@ export function createBackend(app) {
     const s = await staffMe();
     const today = todayIST();
     const rows = await list(query(C('trainings'), where('kvk_id', '==', kvkOf(s))));
+    if (q.when === 'proposals') return rows.filter((tr) => tr.status !== 'published' && tr.end_date >= today).sort(byStart);
     return q.when === 'past' ? rows.filter((tr) => tr.end_date < today).sort((a, b) => byStart(b, a))
       : rows.filter((tr) => tr.end_date >= today).sort(byStart);
   });
@@ -725,7 +736,8 @@ export function createBackend(app) {
     batch.set(ref, {
       category: 'Agriculture', audience: null, description: null, timing: null, venue: null, seats: null, fee: 0, last_date: null,
       contact: null, documents: [], steps: [], active: true, form: null,
-      ...data, ...formField, kvk_id: kvk, created_by: s.id, created_at: now(), updated_at: now(),
+      ...data, ...formField, kvk_id: kvk, created_by: s.id, created_by_name: s.name || null, created_at: now(), updated_at: now(),
+      status: isManager(s) ? 'published' : 'proposed', review_note: null,
     });
     await batch.commit();
     return one('trainings', ref.id);
@@ -734,11 +746,14 @@ export function createBackend(app) {
   route('PUT', '/erp/trainings/:id', async ({ p, body }) => {
     const s = await staffMe();
     const cur = owned(s, await one('trainings', p.id));
+    if (!isManager(s) && cur.status === 'published') throw forbidden('Only a KVK manager can change a published training');
     const { data, form } = trainingInput(body, cur);
     const ref = D('trainings', cur.id);
     const batch = writeBatch(db);
     const formField = writeTraining(batch, ref, cur.kvk_id, form, cur);
-    batch.update(ref, { ...data, ...formField, updated_at: now() });
+    // A staff member editing a rejected proposal sends it back for approval.
+    const resubmit = !isManager(s) && cur.status === 'rejected' ? { status: 'proposed', review_note: null } : {};
+    batch.update(ref, { ...data, ...formField, ...resubmit, updated_at: now() });
     await batch.commit();
     return one('trainings', cur.id);
   });
@@ -746,9 +761,29 @@ export function createBackend(app) {
   route('DELETE', '/erp/trainings/:id', async ({ p }) => {
     const s = await staffMe();
     const cur = owned(s, await one('trainings', p.id));
+    if (!isManager(s) && cur.status === 'published') throw forbidden('Only a KVK manager can delete a published training');
     if (cur.form && !cur.form.url) await deleteDoc(D('training_forms', cur.id));
     await deleteDoc(D('trainings', cur.id));
     return { ok: true };
+  });
+
+  route('POST', '/erp/trainings/:id/approve', async ({ p }) => {
+    const s = await staffMe();
+    managerUp(s);
+    const cur = owned(s, await one('trainings', p.id));
+    if (cur.status === 'published') throw bad('This training is already published');
+    await updateDoc(D('trainings', cur.id), { status: 'published', review_note: null, decided_by: s.id, decided_at: now(), updated_at: now() });
+    return one('trainings', cur.id);
+  });
+
+  route('POST', '/erp/trainings/:id/reject', async ({ p, body }) => {
+    const s = await staffMe();
+    managerUp(s);
+    const cur = owned(s, await one('trainings', p.id));
+    if (cur.status !== 'proposed') throw bad('Only proposals waiting for approval can be sent back');
+    if (!body?.note) throw bad('Please say what needs to change, so the staff member can fix it');
+    await updateDoc(D('trainings', cur.id), { status: 'rejected', review_note: String(body.note), decided_by: s.id, decided_at: now(), updated_at: now() });
+    return one('trainings', cur.id);
   });
 
   // ======================= first-time setup =======================

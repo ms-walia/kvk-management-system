@@ -19,8 +19,9 @@ Both apps use the same data layer, `shared/backend.js`, which talks to Firestore
 - **Equipment**: catalogue with daily rent, units owned, max days per booking; 14-day availability calendar per machine.
 - **Bookings**: approve (capacity checked, no double booking even if two staff click at once), reject with reason, hand over, mark returned with condition. Early returns free up remaining days.
 - **Feeds, fertilizers, seeds**: stock levels with reorder alerts; receive/issue/write-off with a full movement log.
-- **Trainings**: any staff member publishes training programmes for their KVK (agriculture, horticulture, animal
-  husbandry, student programmes…) with dates, daily timing, last date to apply, seats, fee, venue, the "how to apply"
+- **Trainings**: managers and admins publish training programmes for their KVK straight away; staff propose
+  trainings, which a manager approves or sends back with a note (shown on the dashboard and in a Proposals tab).
+  Each training (agriculture, horticulture, animal husbandry, student programmes…) has dates, daily timing, last date to apply, seats, fee, venue, the "how to apply"
   steps, the documents to bring, and the application form (upload a PDF/Word/photo up to 700 KB, or paste a link).
 - **Farmers**: verification queue (check Aadhaar/land record in person, then verify or reject with a reason).
 - **Staff**: managers add staff for their KVK; admins add managers and admins.

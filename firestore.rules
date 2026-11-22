@@ -93,14 +93,22 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/stock_items/$(request.resource.data.item_id)).data.kvk_id == request.resource.data.kvk_id;
     }
 
-    // ---- Training programmes: public schedule; any staff member of the KVK manages them ----
+    // ---- Training programmes. Farmers see published ones. Managers/admins publish directly;
+    //      staff submit proposals (status 'proposed') that a manager approves or rejects. ----
     match /trainings/{id} {
-      allow read: if true;
-      allow create: if staffOf(request.resource.data.kvk_id) && request.resource.data.title is string
-        && request.resource.data.start_date is string && request.resource.data.end_date >= request.resource.data.start_date;
-      allow update: if staffOf(resource.data.kvk_id) && unchanged(['kvk_id', 'created_by', 'created_at'])
-        && request.resource.data.end_date >= request.resource.data.start_date;
-      allow delete: if staffOf(resource.data.kvk_id);
+      function validDates() { return request.resource.data.title is string && request.resource.data.start_date is string
+        && request.resource.data.end_date >= request.resource.data.start_date; }
+      allow read: if resource.data.status == 'published' || staffOf(resource.data.kvk_id);
+      allow create: if staffOf(request.resource.data.kvk_id) && validDates()
+        && request.resource.data.created_by == request.auth.uid
+        && (request.resource.data.status == 'proposed'
+            || (managerOf(request.resource.data.kvk_id) && request.resource.data.status == 'published'));
+      allow update: if validDates() && unchanged(['kvk_id', 'created_by', 'created_at']) && (
+          (managerOf(resource.data.kvk_id) && request.resource.data.status in ['published', 'proposed', 'rejected'])
+          || (staffOf(resource.data.kvk_id) && resource.data.status in ['proposed', 'rejected']
+              && request.resource.data.status == 'proposed' && unchanged(['decided_by', 'decided_at'])));
+      allow delete: if managerOf(resource.data.kvk_id)
+        || (staffOf(resource.data.kvk_id) && resource.data.status != 'published');
     }
     // Application form files (Spark plan has no Storage bucket): base64 in Firestore, one per training
     match /training_forms/{id} {
@@ -108,8 +116,11 @@ service cloud.firestore {
       allow create, update: if staffOf(request.resource.data.kvk_id)
         && (resource == null || resource.data.kvk_id == request.resource.data.kvk_id)
         && getAfter(/databases/$(database)/documents/trainings/$(id)).data.kvk_id == request.resource.data.kvk_id
-        && request.resource.data.data is string && request.resource.data.data.size() <= 960000;
-      allow delete: if staffOf(resource.data.kvk_id);
+        && request.resource.data.data is string && request.resource.data.data.size() <= 960000
+        && (managerOf(request.resource.data.kvk_id)
+            || getAfter(/databases/$(database)/documents/trainings/$(id)).data.status != 'published');
+      allow delete: if managerOf(resource.data.kvk_id) || (staffOf(resource.data.kvk_id)
+        && get(/databases/$(database)/documents/trainings/$(id)).data.status != 'published');
     }
 
     // ---- Bookings ----
